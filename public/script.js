@@ -110,9 +110,9 @@ async function runAssistant(threadId) {
     
     // Poll for completion and handle multiple function calls
     let runStatus = await pollRunStatus(threadId, run.id);
-    let maxIterations = 3; // Reduce to prevent infinite loops
+    let maxIterations = 3;
     let iteration = 0;
-    let generatedImageData = null; // Track if we've generated an image
+    let generatedImageData = null;
     
     while (runStatus.status === 'requires_action' && iteration < maxIterations) {
         iteration++;
@@ -126,7 +126,6 @@ async function runAssistant(threadId) {
             
             if (toolCall.function.name === 'generate_image') {
                 try {
-                    // If we already generated an image, don't generate again
                     if (generatedImageData) {
                         console.log('🔄 Already generated image, using cached result');
                         toolOutputs.push({
@@ -139,12 +138,11 @@ async function runAssistant(threadId) {
                     const args = JSON.parse(toolCall.function.arguments);
                     console.log('🎨 generate_image arguments:', args);
                     
-                    // Generate the image via server
                     const imageResult = await generateImage(args.prompt);
                     console.log('🖼️ Image generation result:', imageResult ? 'Success' : 'Failed');
                     
                     if (imageResult) {
-                        generatedImageData = imageResult.data; // Cache the result
+                        generatedImageData = imageResult.data;
                         toolOutputs.push({
                             tool_call_id: toolCall.id,
                             output: `TASK COMPLETED: Successfully generated aged image. The aging process is now complete. Please show this aged version to the user and do not generate any more images. Image data: ${imageResult.data}`
@@ -173,7 +171,6 @@ async function runAssistant(threadId) {
         
         console.log('📤 Submitting tool outputs:', toolOutputs.length, 'outputs');
         
-        // Submit tool outputs via server
         const submitResponse = await fetch(`/api/threads/${threadId}/runs/${run.id}/submit_tool_outputs`, {
             method: 'POST',
             headers: {
@@ -190,18 +187,15 @@ async function runAssistant(threadId) {
             throw new Error(`Failed to submit tool outputs: ${submitResult.error || 'Unknown error'}`);
         }
         
-        // Poll again for next status
         runStatus = await pollRunStatus(threadId, run.id);
         console.log(`🔄 After tool submission - Status: ${runStatus.status}`);
         
-        // If we generated an image and it's still requiring action, force completion
         if (generatedImageData && runStatus.status === 'requires_action') {
             console.log('🛑 Forcing completion - image already generated');
             break;
         }
     }
     
-    // If we have generated image data but the run is still requiring action, treat as success
     if (generatedImageData && runStatus.status === 'requires_action') {
         console.log('✅ Image generated successfully, treating as completed');
         return `I have successfully generated an aged version of the uploaded image. Here is the result: ![Aged Version](${generatedImageData})`;
@@ -210,7 +204,6 @@ async function runAssistant(threadId) {
     if (runStatus.status === 'completed') {
         console.log('✅ Assistant run completed successfully');
         
-        // Get the latest message via server
         const messagesResponse = await fetch(`/api/threads/${threadId}/messages`);
         const messages = await messagesResponse.json();
         const lastMessage = messages.data[0];
@@ -459,7 +452,7 @@ function addImageMessage(base64Image, fileName) {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// Enhanced image upload handler with better aging prompt
+// SINGLE IMAGE UPLOAD HANDLER - Fixed version for Replicate
 async function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -478,7 +471,7 @@ async function handleImageUpload(event) {
 
     try {
         const base64Image = await fileToBase64(file);
-        console.log('📝 Image converted to base64, length:', base64Image.length);
+        console.log('📝 Image converted to base64');
 
         const welcomeScreen = document.getElementById('welcome-screen');
         const chatContainer = document.getElementById('chat-container');
@@ -491,121 +484,94 @@ async function handleImageUpload(event) {
         addImageMessage(base64Image, file.name);
         showTyping();
 
-        if (!threadId) {
-            threadId = await createThread();
-        }
+        // Process image aging directly with Replicate - targeting age 70
+        console.log('🎨 Starting image aging process with Replicate (target: 50 years)...');
+        
+        const agingResponse = await fetch('/api/age-face', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                imageBase64: base64Image,
+                ageTarget: 50  // Age to 70 for "future career self"
+            })
+        });
 
-        // Enhanced approach: First upload the file, then send a detailed message
-        try {
-            console.log('📁 Uploading file to assistant...');
+        const agingResult = await agingResponse.json();
+
+        console.log('🎨 Aging response received:', agingResult);
+
+        if (agingResult.success) {
+            console.log('✅ Image aging completed successfully');
+            console.log('🖼️ Image URL:', agingResult.agedImageUrl);
             
-            const formData = new FormData();
-            formData.append('file', file);
-
-            const fileResponse = await fetch('/api/upload-file', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (fileResponse.ok) {
-                const fileData = await fileResponse.json();
-                console.log('📁 File uploaded successfully:', fileData.id);
-
-                // Create a comprehensive message for the assistant
-                const detailedMessage = {
-                    content: `DESCRIBE ONLY: I've uploaded a photo. DO NOT generate any images yet. 
-
-ONLY describe what you see in this uploaded image:
-- Is it a man or woman?
-- Approximate age?
-- Hair color and style?
-- Eye color?
-- Face shape?
-- Skin tone?
-- Any distinctive features?
-
-Be very specific about what you observe. Do NOT call generate_image function yet - just describe what you see.`,
-                    attachments: [
-                        {
-                            file_id: fileData.id,
-                            tools: [
-                                { type: "file_search" },
-                                { type: "code_interpreter" }
-                            ]
-                        }
-                    ]
-                };
-
-                await addMessageToThreadWithImage(threadId, detailedMessage);
-                console.log('✅ Detailed image analysis message sent');
-                
-                const response = await runAssistant(threadId);
-                hideTyping();
-                addMessage(response, 'assistant');
-                
-            } else {
-                console.log('⚠️ File upload failed, using fallback approach...');
-                throw new Error('File upload failed');
+            // Ensure we have a valid URL string
+            let imageUrl = agingResult.agedImageUrl;
+            if (typeof imageUrl !== 'string') {
+                console.error('❌ Invalid image URL type:', typeof imageUrl, imageUrl);
+                throw new Error('Invalid image URL format');
             }
             
-        } catch (fileError) {
-            console.log('⚠️ File approach failed, using description approach...');
-            console.error('File error:', fileError);
-            
-            // Fallback: Ask assistant to generate a generic aged portrait
-            const fallbackMessage = `A student has uploaded their photo for an aging exercise. Since the file upload approach failed, please generate a realistic portrait of a person who appears to be 20-30 years older than a typical college student (so around 40-50 years old).
-
-Create a professional portrait showing:
-- Natural aging: wrinkles around eyes (crow's feet), laugh lines, forehead lines
-- Graying or salt-and-pepper hair
-- More mature facial features
-- Gentle age spots or skin texture changes
-- Wise, friendly expression
-- Professional headshot style
-- Realistic human features
-- Good lighting and composition
-
-Use the generate_image function to create this aged portrait.`;
-
-            await addMessageToThread(threadId, fallbackMessage);
-            
-            const response = await runAssistant(threadId);
             hideTyping();
-            addMessage(response, 'assistant');
+            
+            // Show the aged result in Dutch
+            const responseMessage = `
+                Zo zou je er op je ${agingResult.targetAge}ste uit kunnen zien - jouw toekomstige carrière-zelf! 👨‍💼👩‍💼
+                
+                [Je toekomstige zelf op ${agingResult.targetAge}-jarige leeftijd](${imageUrl})
+                
+                Dit is waar je naartoe kunt werken! Welke studie bij de HvA brengt je het dichtst bij deze toekomst?
+            `;
+            
+            addMessage(responseMessage, 'assistant');
+            
+            // Send context to OpenAI assistant for further discussion
+            if (!threadId) {
+                threadId = await createThread();
+            }
+            
+            const contextMessage = `A student has uploaded their photo and I've successfully generated an aged version showing them at age ${agingResult.targetAge} - their "future career self" at the end of their professional life. This represents someone who has had a full, successful career spanning ${agingResult.targetAge - 25}-${agingResult.targetAge - 20} years.
+
+The aged photo shows them as a wise, experienced professional who has completed their career journey. Please engage them in a conversation about:
+
+1. What career path they imagine this wise, ${agingResult.targetAge}-year-old version of themselves had
+2. What professional achievements and life experiences this person represents
+3. How their current study choice at HvA can lead to becoming this successful future self
+4. Whether they feel proud and inspired by this vision of their future
+5. What steps they need to take now to ensure they become this accomplished person
+
+Frame this as looking at their "future career self" - someone who made great choices and had a fulfilling professional life. Keep responses in Dutch and relate everything back to making the right study choices at Hogeschool van Amsterdam (HvA). Be inspiring and help them connect their current decisions to their long-term legacy.`;
+            
+            await addMessageToThread(threadId, contextMessage);
+            
+        } else {
+            console.error('❌ Image aging failed:', agingResult.error);
+            hideTyping();
+            
+            // Show clear error message
+            const errorMessage = agingResult.message || 'Er ging iets mis met het verouderen van je foto.';
+            addMessage(`❌ **Foto veroudering mislukt**
+
+${errorMessage}
+
+**Tips voor betere resultaten:**
+- Gebruik een duidelijke foto met je gezicht recht naar de camera
+- Zorg voor goede belichting
+- Gebruik een foto waar je alleen op staat
+- Probeer een andere foto
+
+Je kunt ondertussen wel gewoon vragen stellen over je studiekeuze bij de HvA!`, 'assistant');
         }
 
     } catch (error) {
         hideTyping();
         console.error('Error processing image:', error);
-        addMessage('Sorry, there was an error processing your photo. Please try again.', 'assistant');
+        addMessage('Sorry, er was een fout bij het verwerken van je foto. Probeer het opnieuw of stel me gewoon vragen over je studiekeuze bij de HvA!', 'assistant');
     }
 
+    // Clear the input
     event.target.value = '';
-}
-
-// Enhanced addMessageToThread for image messages
-async function addMessageToThreadWithImage(threadId, messageContent) {
-    console.log('📤 Sending image message to thread:', threadId);
-    console.log('📋 Message content structure:', JSON.stringify(messageContent, null, 2));
-    
-    const response = await fetch(`/api/threads/${threadId}/messages`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(messageContent)
-    });
-    
-    if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ Error sending image message:', errorData);
-        console.error('📋 Response status:', response.status);
-        throw new Error(`Failed to send image message: ${JSON.stringify(errorData)}`);
-    }
-    
-    const result = await response.json();
-    console.log('✅ Image message sent successfully');
-    return result;
 }
 
 // Initialize when DOM is ready

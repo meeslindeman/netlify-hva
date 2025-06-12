@@ -2,7 +2,32 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
+const Replicate = require('replicate');
 require('dotenv').config();
+
+// Initialize Replicate client
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
+});
+
+// Fix for fetch in Node.js
+let fetch;
+(async () => {
+  if (typeof globalThis.fetch === 'undefined') {
+    const { default: nodeFetch } = await import('node-fetch');
+    fetch = nodeFetch;
+  } else {
+    fetch = globalThis.fetch;
+  }
+})();
+
+async function getFetch() {
+  if (typeof globalThis.fetch !== 'undefined') {
+    return globalThis.fetch;
+  }
+  const { default: nodeFetch } = await import('node-fetch');
+  return nodeFetch;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +46,8 @@ app.use(express.static('public'));
 // Create thread endpoint
 app.post('/api/threads', async (req, res) => {
   try {
+    const fetch = await getFetch();
+    
     const response = await fetch('https://api.openai.com/v1/threads', {
       method: 'POST',
       headers: {
@@ -41,6 +68,7 @@ app.post('/api/threads', async (req, res) => {
 // Add message to thread endpoint
 app.post('/api/threads/:threadId/messages', async (req, res) => {
   try {
+    const fetch = await getFetch();
     const { threadId } = req.params;
     const { content, attachments } = req.body;
     
@@ -71,9 +99,10 @@ app.post('/api/threads/:threadId/messages', async (req, res) => {
   }
 });
 
-// Run assistant endpoint - UPDATED VERSION
+// Run assistant endpoint
 app.post('/api/threads/:threadId/runs', async (req, res) => {
   try {
+    const fetch = await getFetch();
     const { threadId } = req.params;
     
     const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
@@ -114,10 +143,7 @@ app.post('/api/threads/:threadId/runs', async (req, res) => {
     });
     
     const data = await response.json();
-    
-    // Log the response for debugging
     console.log('Assistant run created:', data);
-    
     res.json(data);
   } catch (error) {
     console.error('Run creation error:', error);
@@ -128,6 +154,7 @@ app.post('/api/threads/:threadId/runs', async (req, res) => {
 // Check run status endpoint
 app.get('/api/threads/:threadId/runs/:runId', async (req, res) => {
   try {
+    const fetch = await getFetch();
     const { threadId, runId } = req.params;
     
     const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
@@ -148,6 +175,7 @@ app.get('/api/threads/:threadId/runs/:runId', async (req, res) => {
 // Submit tool outputs endpoint
 app.post('/api/threads/:threadId/runs/:runId/submit_tool_outputs', async (req, res) => {
   try {
+    const fetch = await getFetch();
     const { threadId, runId } = req.params;
     const { tool_outputs } = req.body;
     
@@ -172,6 +200,7 @@ app.post('/api/threads/:threadId/runs/:runId/submit_tool_outputs', async (req, r
 // Get messages endpoint
 app.get('/api/threads/:threadId/messages', async (req, res) => {
   try {
+    const fetch = await getFetch();
     const { threadId } = req.params;
     
     const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
@@ -189,9 +218,10 @@ app.get('/api/threads/:threadId/messages', async (req, res) => {
   }
 });
 
-// Generate image endpoint - UPDATED
+// Generate image endpoint (for OpenAI DALL-E)
 app.post('/api/generate-image', async (req, res) => {
   try {
+    const fetch = await getFetch();
     const { prompt } = req.body;
     
     const requestBody = {
@@ -200,7 +230,7 @@ app.post('/api/generate-image', async (req, res) => {
       n: 1,
       size: "1024x1024",
       quality: "standard",
-      response_format: "b64_json"  // Always use base64
+      response_format: "b64_json"
     };
     
     const response = await fetch('https://api.openai.com/v1/images/generations', {
@@ -233,30 +263,36 @@ app.post('/api/generate-image', async (req, res) => {
   }
 });
 
-// In your server file, update the upload endpoint:
+// File upload endpoint
 app.post('/api/upload-file', upload.single('file'), async (req, res) => {
   try {
+    const fetch = await getFetch();
+    
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
     }
     
     console.log('📁 File received:', req.file.originalname, req.file.mimetype, req.file.size);
     
+    const FormData = (await import('form-data')).default;
     const formData = new FormData();
-    formData.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-    formData.append('purpose', 'assistants'); // Make sure this is 'assistants'
+    formData.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype
+    });
+    formData.append('purpose', 'assistants');
     
     const response = await fetch('https://api.openai.com/v1/files', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...formData.getHeaders()
       },
       body: formData
     });
     
     const data = await response.json();
-    console.log('📁 OpenAI file upload response:', data); // This will show if upload worked
-    
+    console.log('📁 OpenAI file upload response:', data);
     res.json(data);
   } catch (error) {
     console.error('File upload error:', error);
@@ -264,6 +300,91 @@ app.post('/api/upload-file', upload.single('file'), async (req, res) => {
   }
 });
 
+// REPLICATE ROUTES - Using Official Client
+
+// Face aging route using yuval-alaluf/sam model
+app.post('/api/age-face', async (req, res) => {
+    try {
+        // Target age 70 for "future career self" (assuming students are ~20-25)
+        const { imageBase64, ageTarget = 50 } = req.body;
+        
+        console.log('👴 Aging face using yuval-alaluf/sam model, target age:', ageTarget);
+        
+        if (!process.env.REPLICATE_API_TOKEN) {
+            return res.status(500).json({ error: 'Replicate API token not configured' });
+        }
+        
+        const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
+        
+        console.log('🎨 Running yuval-alaluf/sam model...');
+        
+        const validTargetAge = 50; // Target age for "future career self"
+        
+        const input = {
+            image: imageDataUrl,
+            target_age: validTargetAge.toString()
+        };
+
+        console.log(`🎯 Using target age: ${validTargetAge} (future career self)`);
+
+        const output = await replicate.run(
+            "yuval-alaluf/sam:9222a21c181b707209ef12b5e0d7e94c994b58f01c7b2fec075d2e892362f13c",
+            { input }
+        );
+
+        console.log('✅ SAM model completed successfully');
+        console.log('📊 Output constructor:', output?.constructor?.name);
+        
+        // Extract URL from FileOutput object
+        let imageUrl = null;
+        
+        if (typeof output === 'string' && output.startsWith('http')) {
+            imageUrl = output;
+            console.log('✅ Direct string URL found');
+        } else if (Array.isArray(output) && output.length > 0) {
+            const firstItem = output[0];
+            if (typeof firstItem === 'string') {
+                imageUrl = firstItem;
+            } else if (firstItem && typeof firstItem.url === 'function') {
+                const urlResult = await firstItem.url();
+                imageUrl = (urlResult && urlResult.href) ? urlResult.href : urlResult;
+                console.log('✅ Array FileOutput url() called:', imageUrl);
+            }
+        } else if (output && typeof output === 'object' && typeof output.url === 'function') {
+            const urlResult = await output.url();
+            imageUrl = (urlResult && urlResult.href) ? urlResult.href : urlResult;
+            console.log('✅ FileOutput url() function called:', imageUrl);
+        }
+        
+        console.log('🖼️ Final extracted image URL:', imageUrl);
+        
+        if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
+            res.json({
+                success: true,
+                agedImageUrl: imageUrl.trim(),
+                model: 'yuval-alaluf/sam',
+                targetAge: validTargetAge,
+                description: `Aged to ${validTargetAge} years old - your future career self!`
+            });
+        } else {
+            console.error('❌ SAM model failed to return valid image URL');
+            res.status(500).json({ 
+                error: 'SAM aging model failed to generate image',
+                message: 'The face aging AI model encountered an issue. Please try with a different photo (clear, well-lit, single person facing camera).'
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Error with SAM model:', error);
+        res.status(500).json({ 
+            error: 'SAM aging model failed',
+            message: 'The face aging AI model is currently unavailable. Please try again later or use a different photo.',
+            details: error.message 
+        });
+    }
+});
+
+// Remove the alternative aging method - we only use SAM model now
 
 // Serve the main HTML file
 app.get('/', (req, res) => {
@@ -273,5 +394,6 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log('OpenAI Assistant ready!');
+  console.log('Replicate API token:', process.env.REPLICATE_API_TOKEN ? 'Configured ✅' : 'Missing ❌');
+  console.log('Using official Replicate client with yuval-alaluf/sam model');
 });
-
