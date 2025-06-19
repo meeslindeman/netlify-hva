@@ -212,8 +212,105 @@ async function runAssistant(threadId) {
         
         const messagesResponse = await fetch(`/.netlify/functions/messages?threadId=${threadId}`);
         const messages = await messagesResponse.json();
-        const lastMessage = messages.data[0];
-        return lastMessage.content[0].text.value;
+        let lastMessage = messages.data[0].content[0].text.value;
+        
+        // Check if the message contains a DALL-E prompt
+        if (lastMessage.includes('**DALLE_PROMPT_START**') && lastMessage.includes('**DALLE_PROMPT_END**')) {
+            console.log('🎨 Found DALL-E prompt in response');
+            
+            const promptMatch = lastMessage.match(/\*\*DALLE_PROMPT_START\*\*([\s\S]*?)\*\*DALLE_PROMPT_END\*\*/);
+            
+            if (promptMatch) {
+                const dallePrompt = promptMatch[1].trim();
+                console.log('🎨 Extracted DALL-E prompt:', dallePrompt);
+                
+                // Show a loading message while generating image
+                const loadingMessage = lastMessage.replace(
+                    /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
+                    '🎨 *Ik ben je toekomstbeeld aan het maken... Dit kan even duren.*'
+                );
+                
+                // Return the loading message first, then handle image generation asynchronously
+                setTimeout(async () => {
+                    showTyping();
+                    
+                    try {
+                        const imageResponse = await fetch('/.netlify/functions/generate-career-image', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ prompt: dallePrompt })
+                        });
+                        
+                        const imageResult = await imageResponse.json();
+                        
+                        hideTyping();
+                        
+                        if (imageResult.success) {
+                            console.log('✅ DALL-E image generated successfully');
+                            
+                            // Replace the loading message with the actual image
+                            const finalMessage = lastMessage.replace(
+                                /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
+                                `![Je toekomstige professionele zelf](${imageResult.imageUrl})\n\n*Zo zou je eruit kunnen zien in je gekozen carrière!*`
+                            );
+                            
+                            // Remove the last assistant message (loading) and add the final message
+                            const messages = document.querySelectorAll('.message.assistant');
+                            const lastAssistantMessage = messages[messages.length - 1];
+                            if (lastAssistantMessage && lastAssistantMessage.textContent.includes('toekomstbeeld aan het maken')) {
+                                lastAssistantMessage.remove();
+                            }
+                            
+                            addMessage(finalMessage, 'assistant');
+                            
+                        } else {
+                            console.error('❌ DALL-E image generation failed:', imageResult.error);
+                            
+                            // Replace with error message
+                            const errorMessage = lastMessage.replace(
+                                /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
+                                `❌ *Sorry, ik kon geen afbeelding genereren. ${imageResult.message || 'Probeer het later opnieuw.'}*\n\nLaten we gewoon verder gaan met het gesprek over je studiekeuze!`
+                            );
+                            
+                            // Remove the loading message and add the error message
+                            const messages = document.querySelectorAll('.message.assistant');
+                            const lastAssistantMessage = messages[messages.length - 1];
+                            if (lastAssistantMessage && lastAssistantMessage.textContent.includes('toekomstbeeld aan het maken')) {
+                                lastAssistantMessage.remove();
+                            }
+                            
+                            addMessage(errorMessage, 'assistant');
+                        }
+                        
+                    } catch (error) {
+                        console.error('💥 Error calling DALL-E function:', error);
+                        
+                        hideTyping();
+                        
+                        // Remove loading message and show error
+                        const messages = document.querySelectorAll('.message.assistant');
+                        const lastAssistantMessage = messages[messages.length - 1];
+                        if (lastAssistantMessage && lastAssistantMessage.textContent.includes('toekomstbeeld aan het maken')) {
+                            lastAssistantMessage.remove();
+                        }
+                        
+                        const errorMessage = lastMessage.replace(
+                            /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
+                            '❌ *Er ging iets mis met het genereren van de afbeelding. Laten we verder gaan met het gesprek!*'
+                        );
+                        
+                        addMessage(errorMessage, 'assistant');
+                    }
+                }, 100);
+                
+                // Return the loading message immediately
+                return loadingMessage;
+            }
+        }
+        
+        // Normal message without DALL-E prompt
+        return lastMessage;
+        
     } else {
         console.error('❌ Run failed with status:', runStatus.status);
         if (runStatus.last_error) {
