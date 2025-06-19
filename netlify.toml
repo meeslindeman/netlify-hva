@@ -2,8 +2,14 @@
   functions = "netlify/functions"
   publish = "public"
 
+[build.environment]
+  NODE_VERSION = "18"
+
 [functions]
-  timeout = 30
+  external_node_modules = ["openai"]
+
+[functions."generate-career-image"]
+  timeout = 60
 
 [[redirects]]
   from = "/api/threads"
