@@ -38,8 +38,8 @@
   status = 200
 
 [[redirects]]
-  from = "/api/age-face"
-  to = "/.netlify/functions/age-face"
+  from = "/api/generate-career-image"
+  to = "/.netlify/functions/generate-career-image"
   status = 200
 
 [[redirects]]

@@ -385,7 +385,8 @@ async function generateImage(prompt) {
     }
 }
 
-// Updated image upload handler for Netlify
+// Updated handleImageUpload function for the new coaching approach
+
 async function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -415,87 +416,31 @@ async function handleImageUpload(event) {
         }
 
         addImageMessage(base64Image, file.name);
-        showTyping();
-
-        // Process image aging with Netlify function
-        console.log('🎨 Starting image aging process with Netlify function...');
         
-        const agingResponse = await fetch('/.netlify/functions/age-face', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                imageBase64: base64Image,
-                ageTarget: 50
-            })
-        });
-
-        const agingResult = await agingResponse.json();
-        console.log('🎨 Aging response received:', agingResult);
-
-        if (agingResult.success) {
-            console.log('✅ Image aging completed successfully');
-            
-            let imageUrl = agingResult.agedImageUrl;
-            if (typeof imageUrl !== 'string') {
-                console.error('❌ Invalid image URL type:', typeof imageUrl, imageUrl);
-                throw new Error('Invalid image URL format');
-            }
-            
-            hideTyping();
-            
-            const responseMessage = `
-                Zo zou je er op je ${agingResult.targetAge}ste uit kunnen zien - jouw toekomstige carrière-zelf! 👨‍💼👩‍💼
-                
-                [Je toekomstige zelf op ${agingResult.targetAge}-jarige leeftijd](${imageUrl})
-                
-                Dit is waar je naartoe kunt werken! Welke studie bij de HvA brengt je het dichtst bij deze toekomst?
-            `;
-            
-            addMessage(responseMessage, 'assistant');
-            
-            // Send context to OpenAI assistant
-            if (!threadId) {
-                threadId = await createThread();
-            }
-            
-            const contextMessage = `A student has uploaded their photo and I've successfully generated an aged version showing them at age ${agingResult.targetAge} - their "future career self" at the end of their professional life. This represents someone who has had a full, successful career spanning ${agingResult.targetAge - 25}-${agingResult.targetAge - 20} years.
-
-The aged photo shows them as a wise, experienced professional who has completed their career journey. Please engage them in a conversation about:
-
-1. What career path they imagine this wise, ${agingResult.targetAge}-year-old version of themselves had
-2. What professional achievements and life experiences this person represents
-3. How their current study choice at HvA can lead to becoming this successful future self
-4. Whether they feel proud and inspired by this vision of their future
-5. What steps they need to take now to ensure they become this accomplished person
-
-Frame this as looking at their "future career self" - someone who made great choices and had a fulfilling professional life. Keep responses in Dutch and relate everything back to making the right study choices at Hogeschool van Amsterdam (HvA). Be inspiring and help them connect their current decisions to their long-term legacy.`;
-            
-            await addMessageToThread(threadId, contextMessage);
-            
-        } else {
-            console.error('❌ Image aging failed:', agingResult.error);
-            hideTyping();
-            
-            const errorMessage = agingResult.message || 'Er ging iets mis met het verouderen van je foto.';
-            addMessage(`❌ **Foto veroudering mislukt**
-
-${errorMessage}
-
-**Tips voor betere resultaten:**
-- Gebruik een duidelijke foto met je gezicht recht naar de camera
-- Zorg voor goede belichting
-- Gebruik een foto waar je alleen op staat
-- Probeer een andere foto
-
-Je kunt ondertussen wel gewoon vragen stellen over je studiekeuze bij de HvA!`, 'assistant');
+        // Store the uploaded image for the assistant to reference
+        window.uploadedUserImage = base64Image;
+        
+        // Send context to the assistant about the photo upload
+        if (!threadId) {
+            threadId = await createThread();
+        }
+        
+        showTyping();
+        
+        const contextMessage = `De student heeft zojuist een foto van zichzelf geüpload. Reageer enthousiast hierop en leg uit dat je deze foto zult gebruiken om later hun toekomstige professionele zelf te visualiseren zodra je meer weet over hun carrièredoelen. Ga door met je normale gespreksstructuur om hun waarden en toekomstvisie te ontdekken.`;
+        
+        await addMessageToThread(threadId, contextMessage);
+        const response = await runAssistant(threadId);
+        
+        hideTyping();
+        if (response) {
+            addMessage(response, 'assistant');
         }
 
     } catch (error) {
         hideTyping();
         console.error('Error processing image:', error);
-        addMessage('Sorry, er was een fout bij het verwerken van je foto. Probeer het opnieuw of stel me gewoon vragen over je studiekeuze bij de HvA!', 'assistant');
+        addMessage('Sorry, er was een fout bij het verwerken van je foto. Probeer het opnieuw!', 'assistant');
     }
 
     event.target.value = '';
