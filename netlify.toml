@@ -1,0 +1,54 @@
+# netlify.toml
+[build]
+  functions = "netlify/functions"
+  publish = "public"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Redirect API calls to functions
+[[redirects]]
+  from = "/api/threads"
+  to = "/.netlify/functions/threads"
+  status = 200
+
+[[redirects]]
+  from = "/api/threads/:threadId/messages"
+  to = "/.netlify/functions/add-message"
+  status = 200
+
+[[redirects]]
+  from = "/api/threads/:threadId/runs"
+  to = "/.netlify/functions/run-assistant"
+  status = 200
+
+[[redirects]]
+  from = "/api/threads/:threadId/runs/:runId"
+  to = "/.netlify/functions/run-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/threads/:threadId/runs/:runId/submit_tool_outputs"
+  to = "/.netlify/functions/submit-tool-outputs"
+  status = 200
+
+[[redirects]]
+  from = "/api/threads/:threadId/messages"
+  to = "/.netlify/functions/messages"
+  status = 200
+
+[[redirects]]
+  from = "/api/age-face"
+  to = "/.netlify/functions/age-face"
+  status = 200
+
+[[redirects]]
+  from = "/api/generate-image"
+  to = "/.netlify/functions/generate-image"
+  status = 200
+
+# Catch-all for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

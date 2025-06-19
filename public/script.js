@@ -1,3 +1,5 @@
+// Updated script.js for Netlify Functions
+
 // Global variables
 let threadId = null;
 const messageInput = document.getElementById('messageInput');
@@ -62,9 +64,9 @@ async function sendMessage() {
     }
 }
 
-// Server-side API calls (no API keys exposed)
+// Updated API calls for Netlify Functions
 async function createThread() {
-    const response = await fetch('/api/threads', {
+    const response = await fetch('/.netlify/functions/threads', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -76,12 +78,13 @@ async function createThread() {
 }
 
 async function addMessageToThread(threadId, content) {
-    const response = await fetch(`/api/threads/${threadId}/messages`, {
+    const response = await fetch('/.netlify/functions/add-message', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+            threadId: threadId,
             content: content
         })
     });
@@ -93,11 +96,12 @@ async function runAssistant(threadId) {
     console.log('🚀 Starting assistant run for thread:', threadId);
     
     // Start the run
-    const runResponse = await fetch(`/api/threads/${threadId}/runs`, {
+    const runResponse = await fetch('/.netlify/functions/run-assistant', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({ threadId: threadId })
     });
     
     const run = await runResponse.json();
@@ -171,12 +175,14 @@ async function runAssistant(threadId) {
         
         console.log('📤 Submitting tool outputs:', toolOutputs.length, 'outputs');
         
-        const submitResponse = await fetch(`/api/threads/${threadId}/runs/${run.id}/submit_tool_outputs`, {
+        const submitResponse = await fetch('/.netlify/functions/submit-tool-outputs', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
+                threadId: threadId,
+                runId: run.id,
                 tool_outputs: toolOutputs
             })
         });
@@ -204,7 +210,7 @@ async function runAssistant(threadId) {
     if (runStatus.status === 'completed') {
         console.log('✅ Assistant run completed successfully');
         
-        const messagesResponse = await fetch(`/api/threads/${threadId}/messages`);
+        const messagesResponse = await fetch(`/.netlify/functions/messages?threadId=${threadId}`);
         const messages = await messagesResponse.json();
         const lastMessage = messages.data[0];
         return lastMessage.content[0].text.value;
@@ -236,7 +242,7 @@ async function pollRunStatus(threadId, runId) {
         
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        const response = await fetch(`/api/threads/${threadId}/runs/${runId}`);
+        const response = await fetch(`/.netlify/functions/run-status?threadId=${threadId}&runId=${runId}`);
         runData = await response.json();
         status = runData.status;
         attempts++;
@@ -254,12 +260,12 @@ async function pollRunStatus(threadId, runId) {
     return runData;
 }
 
-// Generate image via server API
+// Generate image via Netlify function
 async function generateImage(prompt) {
     console.log('🎨 generateImage() called with prompt:', prompt);
     
     try {
-        const response = await fetch('/api/generate-image', {
+        const response = await fetch('/.netlify/functions/generate-image', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -282,6 +288,123 @@ async function generateImage(prompt) {
     }
 }
 
+// Updated image upload handler for Netlify
+async function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    console.log('📸 Image uploaded:', file.name, file.type, file.size);
+
+    if (!file.type.startsWith('image/')) {
+        alert('Please select an image file.');
+        return;
+    }
+
+    if (file.size > 20 * 1024 * 1024) {
+        alert('Image too large. Please select an image under 20MB.');
+        return;
+    }
+
+    try {
+        const base64Image = await fileToBase64(file);
+        console.log('📝 Image converted to base64');
+
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const chatContainer = document.getElementById('chat-container');
+
+        if (welcomeScreen && welcomeScreen.style.display !== 'none') {
+            welcomeScreen.style.display = 'none';
+            chatContainer.style.display = 'block';
+        }
+
+        addImageMessage(base64Image, file.name);
+        showTyping();
+
+        // Process image aging with Netlify function
+        console.log('🎨 Starting image aging process with Netlify function...');
+        
+        const agingResponse = await fetch('/.netlify/functions/age-face', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                imageBase64: base64Image,
+                ageTarget: 50
+            })
+        });
+
+        const agingResult = await agingResponse.json();
+        console.log('🎨 Aging response received:', agingResult);
+
+        if (agingResult.success) {
+            console.log('✅ Image aging completed successfully');
+            
+            let imageUrl = agingResult.agedImageUrl;
+            if (typeof imageUrl !== 'string') {
+                console.error('❌ Invalid image URL type:', typeof imageUrl, imageUrl);
+                throw new Error('Invalid image URL format');
+            }
+            
+            hideTyping();
+            
+            const responseMessage = `
+                Zo zou je er op je ${agingResult.targetAge}ste uit kunnen zien - jouw toekomstige carrière-zelf! 👨‍💼👩‍💼
+                
+                [Je toekomstige zelf op ${agingResult.targetAge}-jarige leeftijd](${imageUrl})
+                
+                Dit is waar je naartoe kunt werken! Welke studie bij de HvA brengt je het dichtst bij deze toekomst?
+            `;
+            
+            addMessage(responseMessage, 'assistant');
+            
+            // Send context to OpenAI assistant
+            if (!threadId) {
+                threadId = await createThread();
+            }
+            
+            const contextMessage = `A student has uploaded their photo and I've successfully generated an aged version showing them at age ${agingResult.targetAge} - their "future career self" at the end of their professional life. This represents someone who has had a full, successful career spanning ${agingResult.targetAge - 25}-${agingResult.targetAge - 20} years.
+
+The aged photo shows them as a wise, experienced professional who has completed their career journey. Please engage them in a conversation about:
+
+1. What career path they imagine this wise, ${agingResult.targetAge}-year-old version of themselves had
+2. What professional achievements and life experiences this person represents
+3. How their current study choice at HvA can lead to becoming this successful future self
+4. Whether they feel proud and inspired by this vision of their future
+5. What steps they need to take now to ensure they become this accomplished person
+
+Frame this as looking at their "future career self" - someone who made great choices and had a fulfilling professional life. Keep responses in Dutch and relate everything back to making the right study choices at Hogeschool van Amsterdam (HvA). Be inspiring and help them connect their current decisions to their long-term legacy.`;
+            
+            await addMessageToThread(threadId, contextMessage);
+            
+        } else {
+            console.error('❌ Image aging failed:', agingResult.error);
+            hideTyping();
+            
+            const errorMessage = agingResult.message || 'Er ging iets mis met het verouderen van je foto.';
+            addMessage(`❌ **Foto veroudering mislukt**
+
+${errorMessage}
+
+**Tips voor betere resultaten:**
+- Gebruik een duidelijke foto met je gezicht recht naar de camera
+- Zorg voor goede belichting
+- Gebruik een foto waar je alleen op staat
+- Probeer een andere foto
+
+Je kunt ondertussen wel gewoon vragen stellen over je studiekeuze bij de HvA!`, 'assistant');
+        }
+
+    } catch (error) {
+        hideTyping();
+        console.error('Error processing image:', error);
+        addMessage('Sorry, er was een fout bij het verwerken van je foto. Probeer het opnieuw of stel me gewoon vragen over je studiekeuze bij de HvA!', 'assistant');
+    }
+
+    event.target.value = '';
+}
+
+// Rest of the functions remain the same
 function addMessage(text, sender) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${sender}`;
@@ -293,7 +416,6 @@ function addMessage(text, sender) {
     messageDiv.appendChild(contentDiv);
     chatContainer.insertBefore(messageDiv, typingIndicator);
     
-    // Scroll to bottom
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
@@ -302,13 +424,11 @@ function formatMessage(text) {
     
     let processedText = text;
     
-    // Handle "Generated image:" text with base64 data
     processedText = processedText.replace(/Generated image:\s*(data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+)/gi, function(match, dataUrl) {
         console.log('🖼️ Found generated image text with base64');
         return `<img src="${dataUrl}" alt="Generated image" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
     });
     
-    // Handle "Generated image:" text with URLs
     processedText = processedText.replace(/Generated image:\s*(https:\/\/[^\s]+)/gi, function(match, url) {
         console.log('🖼️ Found generated image text with URL');
         
@@ -321,7 +441,6 @@ function formatMessage(text) {
         return `<div id="${containerId}">Loading image...</div>`;
     });
     
-    // Handle markdown links with images
     processedText = processedText.replace(/\[([^\]]*)\]\(((?:data:image\/[^)]+|https:\/\/[^)]+))\)/gi, function(match, alt, url) {
         console.log('🖼️ Found markdown image:', alt, url.startsWith('data:') ? 'base64' : 'URL');
         
@@ -393,36 +512,6 @@ function hideTyping() {
     sendBtn.disabled = false;
 }
 
-// Focus input on load
-messageInput.focus();
-
-// Test API connection on load
-async function testConnection() {
-    console.log('✅ Ready to chat with your GPT Assistant!');
-}
-
-// Test connection when page loads
-window.addEventListener('load', testConnection);
-
-// Initialize image upload functionality
-function initializeImageUpload() {
-    const uploadBtn = document.getElementById('uploadBtn');
-    const fileInput = document.getElementById('imageFileInput');
-    
-    if (!uploadBtn || !fileInput) {
-        console.error('Upload button or file input not found');
-        return;
-    }
-    
-    uploadBtn.addEventListener('click', () => {
-        fileInput.click();
-    });
-    
-    fileInput.addEventListener('change', handleImageUpload);
-    
-    console.log('📷 Image upload functionality initialized');
-}
-
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -452,127 +541,35 @@ function addImageMessage(base64Image, fileName) {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// SINGLE IMAGE UPLOAD HANDLER - Fixed version for Replicate
-async function handleImageUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    console.log('📸 Image uploaded:', file.name, file.type, file.size);
-
-    if (!file.type.startsWith('image/')) {
-        alert('Please select an image file.');
+// Initialize image upload functionality
+function initializeImageUpload() {
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileInput = document.getElementById('imageFileInput');
+    
+    if (!uploadBtn || !fileInput) {
+        console.error('Upload button or file input not found');
         return;
     }
-
-    if (file.size > 20 * 1024 * 1024) {
-        alert('Image too large. Please select an image under 20MB.');
-        return;
-    }
-
-    try {
-        const base64Image = await fileToBase64(file);
-        console.log('📝 Image converted to base64');
-
-        const welcomeScreen = document.getElementById('welcome-screen');
-        const chatContainer = document.getElementById('chat-container');
-
-        if (welcomeScreen && welcomeScreen.style.display !== 'none') {
-            welcomeScreen.style.display = 'none';
-            chatContainer.style.display = 'block';
-        }
-
-        addImageMessage(base64Image, file.name);
-        showTyping();
-
-        // Process image aging directly with Replicate - targeting age 70
-        console.log('🎨 Starting image aging process with Replicate (target: 50 years)...');
-        
-        const agingResponse = await fetch('/api/age-face', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                imageBase64: base64Image,
-                ageTarget: 50  // Age to 70 for "future career self"
-            })
-        });
-
-        const agingResult = await agingResponse.json();
-
-        console.log('🎨 Aging response received:', agingResult);
-
-        if (agingResult.success) {
-            console.log('✅ Image aging completed successfully');
-            console.log('🖼️ Image URL:', agingResult.agedImageUrl);
-            
-            // Ensure we have a valid URL string
-            let imageUrl = agingResult.agedImageUrl;
-            if (typeof imageUrl !== 'string') {
-                console.error('❌ Invalid image URL type:', typeof imageUrl, imageUrl);
-                throw new Error('Invalid image URL format');
-            }
-            
-            hideTyping();
-            
-            // Show the aged result in Dutch
-            const responseMessage = `
-                Zo zou je er op je ${agingResult.targetAge}ste uit kunnen zien - jouw toekomstige carrière-zelf! 👨‍💼👩‍💼
-                
-                [Je toekomstige zelf op ${agingResult.targetAge}-jarige leeftijd](${imageUrl})
-                
-                Dit is waar je naartoe kunt werken! Welke studie bij de HvA brengt je het dichtst bij deze toekomst?
-            `;
-            
-            addMessage(responseMessage, 'assistant');
-            
-            // Send context to OpenAI assistant for further discussion
-            if (!threadId) {
-                threadId = await createThread();
-            }
-            
-            const contextMessage = `A student has uploaded their photo and I've successfully generated an aged version showing them at age ${agingResult.targetAge} - their "future career self" at the end of their professional life. This represents someone who has had a full, successful career spanning ${agingResult.targetAge - 25}-${agingResult.targetAge - 20} years.
-
-The aged photo shows them as a wise, experienced professional who has completed their career journey. Please engage them in a conversation about:
-
-1. What career path they imagine this wise, ${agingResult.targetAge}-year-old version of themselves had
-2. What professional achievements and life experiences this person represents
-3. How their current study choice at HvA can lead to becoming this successful future self
-4. Whether they feel proud and inspired by this vision of their future
-5. What steps they need to take now to ensure they become this accomplished person
-
-Frame this as looking at their "future career self" - someone who made great choices and had a fulfilling professional life. Keep responses in Dutch and relate everything back to making the right study choices at Hogeschool van Amsterdam (HvA). Be inspiring and help them connect their current decisions to their long-term legacy.`;
-            
-            await addMessageToThread(threadId, contextMessage);
-            
-        } else {
-            console.error('❌ Image aging failed:', agingResult.error);
-            hideTyping();
-            
-            // Show clear error message
-            const errorMessage = agingResult.message || 'Er ging iets mis met het verouderen van je foto.';
-            addMessage(`❌ **Foto veroudering mislukt**
-
-${errorMessage}
-
-**Tips voor betere resultaten:**
-- Gebruik een duidelijke foto met je gezicht recht naar de camera
-- Zorg voor goede belichting
-- Gebruik een foto waar je alleen op staat
-- Probeer een andere foto
-
-Je kunt ondertussen wel gewoon vragen stellen over je studiekeuze bij de HvA!`, 'assistant');
-        }
-
-    } catch (error) {
-        hideTyping();
-        console.error('Error processing image:', error);
-        addMessage('Sorry, er was een fout bij het verwerken van je foto. Probeer het opnieuw of stel me gewoon vragen over je studiekeuze bij de HvA!', 'assistant');
-    }
-
-    // Clear the input
-    event.target.value = '';
+    
+    uploadBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', handleImageUpload);
+    
+    console.log('📷 Image upload functionality initialized');
 }
+
+// Focus input on load
+messageInput.focus();
+
+// Test API connection on load
+async function testConnection() {
+    console.log('✅ Ready to chat with your GPT Assistant!');
+}
+
+// Test connection when page loads
+window.addEventListener('load', testConnection);
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
