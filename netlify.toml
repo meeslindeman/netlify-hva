@@ -1,12 +1,10 @@
-# netlify.toml
 [build]
   functions = "netlify/functions"
   publish = "public"
 
-[build.environment]
-  NODE_VERSION = "18"
+[functions]
+  timeout = 30
 
-# Redirect API calls to functions
 [[redirects]]
   from = "/api/threads"
   to = "/.netlify/functions/threads"
@@ -42,12 +40,6 @@
   to = "/.netlify/functions/generate-career-image"
   status = 200
 
-[[redirects]]
-  from = "/api/generate-image"
-  to = "/.netlify/functions/generate-image"
-  status = 200
-
-# Catch-all for SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
