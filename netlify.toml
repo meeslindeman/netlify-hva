@@ -8,8 +8,7 @@
 [functions]
   external_node_modules = ["openai"]
 
-[[functions]]
-  path = "netlify/functions/generate-career-image.js"
+[functions."generate-career-image"]
   timeout = 60
 
 [[redirects]]
