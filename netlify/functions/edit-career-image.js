@@ -29,9 +29,12 @@ exports.handler = async (event, context) => {
   }
 
   try {
+    console.log('🎯 Starting edit-career-image function');
+    
     const { imageData, careerField, specificRole } = JSON.parse(event.body);
     
     if (!imageData) {
+      console.error('❌ No image data provided');
       return {
         statusCode: 400,
         headers,
@@ -43,6 +46,7 @@ exports.handler = async (event, context) => {
     }
 
     if (!careerField) {
+      console.error('❌ No career field provided');
       return {
         statusCode: 400,
         headers,
@@ -64,25 +68,33 @@ exports.handler = async (event, context) => {
     const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
     
-    // Determine image type
-    const imageType = imageData.includes('data:image/png') ? 'image/png' : 'image/jpeg';
+    console.log('📊 Image buffer size:', imageBuffer.length, 'bytes');
     
-    // Create a File-like object for OpenAI
-    const imageFile = new File([imageBuffer], 'image.jpg', { type: imageType });
+    // Import toFile from OpenAI for proper file handling
+    const { toFile } = require('openai');
+    
+    // Create proper file object for OpenAI
+    const imageFile = await toFile(imageBuffer, 'image.png', {
+      type: 'image/png'
+    });
+    
+    console.log('📁 Created file object for OpenAI');
     
     // Set up timeout promise to prevent Netlify timeout
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Request timeout')), 24000); // 24s timeout
     });
     
-    // Edit image with OpenAI
+    // Edit image with OpenAI using proper file object
     const editPromise = openai.images.edit({
-      model: "dall-e-2", // Note: edit endpoint uses dall-e-2
+      model: "dall-e-2",
       image: imageFile,
       prompt: prompt,
       response_format: "b64_json",
       size: "1024x1024"
     });
+    
+    console.log('🚀 Starting OpenAI image edit request...');
     
     // Race between edit and timeout
     const response = await Promise.race([editPromise, timeoutPromise]);
@@ -96,7 +108,7 @@ exports.handler = async (event, context) => {
     const editedImageBase64 = response.data[0].b64_json;
     const imageUrl = `data:image/png;base64,${editedImageBase64}`;
     
-    console.log('✅ Career image edited successfully');
+    console.log('✅ Career image edited successfully, size:', editedImageBase64.length, 'chars');
     
     return {
       statusCode: 200,
@@ -112,6 +124,8 @@ exports.handler = async (event, context) => {
 
   } catch (error) {
     console.error('❌ Error editing career image:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
     console.error('❌ Error at:', new Date().toISOString());
     
     let errorMessage = 'Er ging iets mis bij het bewerken van de afbeelding.';
@@ -124,6 +138,10 @@ exports.handler = async (event, context) => {
       errorMessage = 'Te veel verzoeken. Probeer het over een minuut opnieuw.';
     } else if (error.message.includes('quota') || error.message.includes('insufficient_quota')) {
       errorMessage = 'OpenAI service tijdelijk niet beschikbaar. Probeer het later opnieuw.';
+    } else if (error.message.includes('Invalid image')) {
+      errorMessage = 'De geüploade afbeelding is niet geschikt. Probeer een andere foto.';
+    } else if (error.message.includes('image_size')) {
+      errorMessage = 'De afbeelding is te groot of heeft een ongeldige grootte.';
     }
 
     return {
@@ -132,7 +150,12 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: false,
         error: error.message,
-        message: errorMessage
+        message: errorMessage,
+        debug: {
+          hasImageData: !!imageData,
+          careerField: careerField,
+          errorType: error.constructor.name
+        }
       })
     };
   }
