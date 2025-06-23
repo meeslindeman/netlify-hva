@@ -8,9 +8,14 @@
 [functions]
   external_node_modules = ["openai"]
 
+# Timeout configurations for specific functions
 [functions."generate-career-image"]
   timeout = 60
 
+[functions."edit-career-image"]
+  timeout = 30
+
+# API redirects for original endpoints
 [[redirects]]
   from = "/api/threads"
   to = "/.netlify/functions/threads"
@@ -41,11 +46,18 @@
   to = "/.netlify/functions/messages"
   status = 200
 
+# Image generation endpoints
 [[redirects]]
   from = "/api/generate-career-image"
   to = "/.netlify/functions/generate-career-image"
   status = 200
 
+[[redirects]]
+  from = "/api/edit-career-image"
+  to = "/.netlify/functions/edit-career-image"
+  status = 200
+
+# Catch-all redirect for SPA
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -1,7 +1,8 @@
-// Updated script.js for Netlify Functions
+// Updated script.js for Function Calling approach
 
 // Global variables
 let threadId = null;
+let uploadedUserImage = null; // Store the uploaded image globally
 const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const chatContainer = document.getElementById('chat-container');
@@ -64,7 +65,7 @@ async function sendMessage() {
     }
 }
 
-// Updated API calls for Netlify Functions
+// API calls for Netlify Functions
 async function createThread() {
     const response = await fetch('/.netlify/functions/threads', {
         method: 'POST',
@@ -112,11 +113,10 @@ async function runAssistant(threadId) {
         throw new Error('Failed to create run - no ID returned');
     }
     
-    // Poll for completion and handle multiple function calls
+    // Poll for completion and handle function calls
     let runStatus = await pollRunStatus(threadId, run.id);
-    let maxIterations = 3;
+    let maxIterations = 5;
     let iteration = 0;
-    let generatedImageData = null;
     
     while (runStatus.status === 'requires_action' && iteration < maxIterations) {
         iteration++;
@@ -128,40 +128,58 @@ async function runAssistant(threadId) {
         for (const toolCall of toolCalls) {
             console.log('🔧 Processing function call:', toolCall.function.name);
             
-            if (toolCall.function.name === 'generate_image') {
+            if (toolCall.function.name === 'generate_career_visualization') {
                 try {
-                    if (generatedImageData) {
-                        console.log('🔄 Already generated image, using cached result');
+                    const args = JSON.parse(toolCall.function.arguments);
+                    console.log('🎨 generate_career_visualization arguments:', args);
+                    
+                    // Check if we have an uploaded image
+                    if (!uploadedUserImage) {
                         toolOutputs.push({
                             tool_call_id: toolCall.id,
-                            output: `TASK COMPLETED: Image already generated successfully. Here is the aged version: ${generatedImageData}`
+                            output: "ERROR: No uploaded image available. Please ask the user to upload a photo first before generating career visualization."
                         });
                         continue;
                     }
                     
-                    const args = JSON.parse(toolCall.function.arguments);
-                    console.log('🎨 generate_image arguments:', args);
+                    // Show loading message to user
+                    addMessage(`🎨 ${args.userMessage || 'Ik maak nu een beeld van jouw professionele toekomst... Dit kan even duren.'}`, 'assistant');
+                    showTyping();
                     
-                    const imageResult = await generateImage(args.prompt);
-                    console.log('🖼️ Image generation result:', imageResult ? 'Success' : 'Failed');
+                    const imageResult = await generateCareerImage(
+                        uploadedUserImage, 
+                        args.careerField, 
+                        args.specificRole
+                    );
                     
-                    if (imageResult) {
-                        generatedImageData = imageResult.data;
+                    hideTyping();
+                    
+                    if (imageResult && imageResult.success) {
+                        // Remove the loading message
+                        removeLastAssistantMessage();
+                        
                         toolOutputs.push({
                             tool_call_id: toolCall.id,
-                            output: `TASK COMPLETED: Successfully generated aged image. The aging process is now complete. Please show this aged version to the user and do not generate any more images. Image data: ${imageResult.data}`
+                            output: `SUCCESS: Career visualization generated successfully. The image shows the user as a professional ${args.careerField} worker. Image URL: ${imageResult.imageUrl}`
                         });
                     } else {
+                        // Remove the loading message
+                        removeLastAssistantMessage();
+                        
                         toolOutputs.push({
                             tool_call_id: toolCall.id,
-                            output: "Failed to generate image - please try a different approach"
+                            output: `ERROR: Failed to generate career visualization. ${imageResult?.message || 'Please try again later.'}`
                         });
                     }
+                    
                 } catch (error) {
-                    console.error('❌ Error processing generate_image:', error);
+                    console.error('❌ Error processing generate_career_visualization:', error);
+                    hideTyping();
+                    removeLastAssistantMessage();
+                    
                     toolOutputs.push({
                         tool_call_id: toolCall.id,
-                        output: "Error generating image"
+                        output: `ERROR: ${error.message}`
                     });
                 }
             } else {
@@ -195,16 +213,6 @@ async function runAssistant(threadId) {
         
         runStatus = await pollRunStatus(threadId, run.id);
         console.log(`🔄 After tool submission - Status: ${runStatus.status}`);
-        
-        if (generatedImageData && runStatus.status === 'requires_action') {
-            console.log('🛑 Forcing completion - image already generated');
-            break;
-        }
-    }
-    
-    if (generatedImageData && runStatus.status === 'requires_action') {
-        console.log('✅ Image generated successfully, treating as completed');
-        return `I have successfully generated an aged version of the uploaded image. Here is the result: ![Aged Version](${generatedImageData})`;
     }
     
     if (runStatus.status === 'completed') {
@@ -214,101 +222,6 @@ async function runAssistant(threadId) {
         const messages = await messagesResponse.json();
         let lastMessage = messages.data[0].content[0].text.value;
         
-        // Check if the message contains a DALL-E prompt
-        if (lastMessage.includes('**DALLE_PROMPT_START**') && lastMessage.includes('**DALLE_PROMPT_END**')) {
-            console.log('🎨 Found DALL-E prompt in response');
-            
-            const promptMatch = lastMessage.match(/\*\*DALLE_PROMPT_START\*\*([\s\S]*?)\*\*DALLE_PROMPT_END\*\*/);
-            
-            if (promptMatch) {
-                const dallePrompt = promptMatch[1].trim();
-                console.log('🎨 Extracted DALL-E prompt:', dallePrompt);
-                
-                // Show a loading message while generating image
-                const loadingMessage = lastMessage.replace(
-                    /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
-                    '🎨 *Ik ben je toekomstbeeld aan het maken... Dit kan even duren.*'
-                );
-                
-                // Return the loading message first, then handle image generation asynchronously
-                setTimeout(async () => {
-                    showTyping();
-                    
-                    try {
-                        const imageResponse = await fetch('/.netlify/functions/generate-career-image', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ prompt: dallePrompt })
-                        });
-                        
-                        const imageResult = await imageResponse.json();
-                        
-                        hideTyping();
-                        
-                        if (imageResult.success) {
-                            console.log('✅ DALL-E image generated successfully');
-                            
-                            // Replace the loading message with the actual image
-                            const finalMessage = lastMessage.replace(
-                                /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
-                                `![Je toekomstige professionele zelf](${imageResult.imageUrl})\n\n*Zo zou je eruit kunnen zien in je gekozen carrière!*`
-                            );
-                            
-                            // Remove the last assistant message (loading) and add the final message
-                            const messages = document.querySelectorAll('.message.assistant');
-                            const lastAssistantMessage = messages[messages.length - 1];
-                            if (lastAssistantMessage && lastAssistantMessage.textContent.includes('toekomstbeeld aan het maken')) {
-                                lastAssistantMessage.remove();
-                            }
-                            
-                            addMessage(finalMessage, 'assistant');
-                            
-                        } else {
-                            console.error('❌ DALL-E image generation failed:', imageResult.error);
-                            
-                            // Replace with error message
-                            const errorMessage = lastMessage.replace(
-                                /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
-                                `❌ *Sorry, ik kon geen afbeelding genereren. ${imageResult.message || 'Probeer het later opnieuw.'}*\n\nLaten we gewoon verder gaan met het gesprek over je studiekeuze!`
-                            );
-                            
-                            // Remove the loading message and add the error message
-                            const messages = document.querySelectorAll('.message.assistant');
-                            const lastAssistantMessage = messages[messages.length - 1];
-                            if (lastAssistantMessage && lastAssistantMessage.textContent.includes('toekomstbeeld aan het maken')) {
-                                lastAssistantMessage.remove();
-                            }
-                            
-                            addMessage(errorMessage, 'assistant');
-                        }
-                        
-                    } catch (error) {
-                        console.error('💥 Error calling DALL-E function:', error);
-                        
-                        hideTyping();
-                        
-                        // Remove loading message and show error
-                        const messages = document.querySelectorAll('.message.assistant');
-                        const lastAssistantMessage = messages[messages.length - 1];
-                        if (lastAssistantMessage && lastAssistantMessage.textContent.includes('toekomstbeeld aan het maken')) {
-                            lastAssistantMessage.remove();
-                        }
-                        
-                        const errorMessage = lastMessage.replace(
-                            /\*\*DALLE_PROMPT_START\*\*[\s\S]*?\*\*DALLE_PROMPT_END\*\*/,
-                            '❌ *Er ging iets mis met het genereren van de afbeelding. Laten we verder gaan met het gesprek!*'
-                        );
-                        
-                        addMessage(errorMessage, 'assistant');
-                    }
-                }, 100);
-                
-                // Return the loading message immediately
-                return loadingMessage;
-            }
-        }
-        
-        // Normal message without DALL-E prompt
         return lastMessage;
         
     } else {
@@ -357,35 +270,38 @@ async function pollRunStatus(threadId, runId) {
     return runData;
 }
 
-// Generate image via Netlify function
-async function generateImage(prompt) {
-    console.log('🎨 generateImage() called with prompt:', prompt);
+// New function to generate career image using the edit approach
+async function generateCareerImage(imageData, careerField, specificRole) {
+    console.log('🎨 generateCareerImage() called with field:', careerField);
     
     try {
-        const response = await fetch('/.netlify/functions/generate-image', {
+        const response = await fetch('/.netlify/functions/edit-career-image', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ prompt: prompt })
+            body: JSON.stringify({ 
+                imageData: imageData,
+                careerField: careerField,
+                specificRole: specificRole
+            })
         });
         
         if (!response.ok) {
-            console.error('❌ Image generation API error:', response.status);
-            return null;
+            console.error('❌ Career image generation API error:', response.status);
+            const errorData = await response.json();
+            return { success: false, message: errorData.message };
         }
         
         const data = await response.json();
-        console.log('📊 Image generation response type:', data.type);
+        console.log('📊 Career image generation response:', data.success ? 'Success' : 'Failed');
         
         return data;
     } catch (error) {
-        console.error('💥 Error in generateImage():', error);
-        return null;
+        console.error('💥 Error in generateCareerImage():', error);
+        return { success: false, message: 'Network error occurred' };
     }
 }
-
-// Updated handleImageUpload function for the new coaching approach
 
 async function handleImageUpload(event) {
     const file = event.target.files[0];
@@ -417,8 +333,8 @@ async function handleImageUpload(event) {
 
         addImageMessage(base64Image, file.name);
         
-        // Store the uploaded image for the assistant to reference
-        window.uploadedUserImage = base64Image;
+        // Store the uploaded image globally
+        uploadedUserImage = base64Image;
         
         // Send context to the assistant about the photo upload
         if (!threadId) {
@@ -446,7 +362,6 @@ async function handleImageUpload(event) {
     event.target.value = '';
 }
 
-// Rest of the functions remain the same
 function addMessage(text, sender) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${sender}`;
@@ -461,46 +376,29 @@ function addMessage(text, sender) {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+function removeLastAssistantMessage() {
+    const messages = document.querySelectorAll('.message.assistant');
+    if (messages.length > 0) {
+        const lastMessage = messages[messages.length - 1];
+        lastMessage.remove();
+    }
+}
+
 function formatMessage(text) {
     console.log('📝 Original message:', text);
     
     let processedText = text;
     
-    processedText = processedText.replace(/Generated image:\s*(data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+)/gi, function(match, dataUrl) {
-        console.log('🖼️ Found generated image text with base64');
-        return `<img src="${dataUrl}" alt="Generated image" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
+    // Handle different image URL formats
+    processedText = processedText.replace(/Image URL:\s*(data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+)/gi, function(match, dataUrl) {
+        console.log('🖼️ Found career image with base64');
+        return `<img src="${dataUrl}" alt="Your professional future" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
     });
     
-    processedText = processedText.replace(/Generated image:\s*(https:\/\/[^\s]+)/gi, function(match, url) {
-        console.log('🖼️ Found generated image text with URL');
-        
-        const containerId = 'img_container_' + Math.random().toString(36).substr(2, 9);
-        
-        setTimeout(() => {
-            handleImageLoading(url, "Generated image", containerId);
-        }, 100);
-        
-        return `<div id="${containerId}">Loading image...</div>`;
+    processedText = processedText.replace(/\[([^\]]*)\]\((data:image\/[^)]+)\)/gi, function(match, alt, url) {
+        console.log('🖼️ Found markdown image with base64:', alt);
+        return `<img src="${url}" alt="${alt}" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
     });
-    
-    processedText = processedText.replace(/\[([^\]]*)\]\(((?:data:image\/[^)]+|https:\/\/[^)]+))\)/gi, function(match, alt, url) {
-        console.log('🖼️ Found markdown image:', alt, url.startsWith('data:') ? 'base64' : 'URL');
-        
-        if (url.startsWith('data:')) {
-            return `<img src="${url}" alt="${alt}" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
-        } else {
-            const containerId = 'img_container_' + Math.random().toString(36).substr(2, 9);
-            
-            setTimeout(() => {
-                handleImageLoading(url, alt, containerId);
-            }, 100);
-            
-            return `<div id="${containerId}">Loading image...</div>`;
-        }
-    });
-    
-    // Clean up any remaining URLs
-    processedText = processedText.replace(/(https:\/\/oaidalleapiprodscus\.blob\.core\.windows\.net\/[^\s]+)/gi, '');
     
     // Basic formatting
     processedText = processedText
@@ -510,37 +408,6 @@ function formatMessage(text) {
     
     console.log('✅ Processed message');
     return processedText;
-}
-
-function handleImageLoading(url, alt, containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = alt;
-    img.style.maxWidth = '100%';
-    img.style.borderRadius = '8px';
-    img.style.margin = '8px 0';
-    img.style.display = 'block';
-    
-    img.onload = function() {
-        console.log('🎉 Image loaded successfully:', alt);
-        container.innerHTML = '';
-        container.appendChild(img);
-    };
-    
-    img.onerror = function() {
-        console.log('❌ Image failed to load:', alt);
-        container.innerHTML = `
-            <div style="background: #f1f5f9; border: 2px dashed #94a3b8; border-radius: 8px; padding: 20px; text-align: center; margin: 8px 0;">
-                <p style="color: #64748b; margin: 0; font-size: 1.1em;">🎨 ${alt}</p>
-                <p style="color: #94a3b8; font-size: 0.9em; margin: 4px 0 0 0;">Image temporarily unavailable</p>
-            </div>
-        `;
-    };
-    
-    container.innerHTML = 'Loading image...';
 }
 
 function showTyping() {
@@ -607,7 +474,7 @@ messageInput.focus();
 
 // Test API connection on load
 async function testConnection() {
-    console.log('✅ Ready to chat with your GPT Assistant!');
+    console.log('✅ Ready to chat with your Study Choice Coach!');
 }
 
 // Test connection when page loads
