@@ -1,5 +1,7 @@
 // netlify/functions/edit-career-image.js
 const OpenAI = require('openai');
+const { toFile } = require('openai');
+const { Readable } = require('stream');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -60,23 +62,25 @@ exports.handler = async (event, context) => {
     console.log('🎨 Editing image for career field:', careerField);
     console.log('⏰ Starting edit at:', new Date().toISOString());
     
-    // Create career-specific prompt
+    // Create career-specific prompt (keep it simple like the working example)
     const prompt = createCareerPrompt(careerField, specificRole);
     console.log('📝 Using prompt:', prompt);
     
-    // Convert base64 image data to buffer
+    // Convert base64 image data to buffer (exactly like the working script)
     const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
     
     console.log('📊 Image buffer size:', imageBuffer.length, 'bytes');
     
-    // Import toFile from OpenAI for proper file handling
-    const { toFile } = require('openai');
+    // Determine image type (like the working script)
+    const imageType = imageData.includes('data:image/png') ? 'image/png' : 'image/jpeg';
+    console.log('📊 Image type:', imageType);
     
-    // Create proper file object for OpenAI
-    const imageFile = await toFile(imageBuffer, 'image.png', {
-      type: 'image/png'
-    });
+    // Create a readable stream from the buffer (like fs.createReadStream in working script)
+    const imageStream = Readable.from(imageBuffer);
+    
+    // Convert to file format suitable for OpenAI API (exactly like working script)
+    const image = await toFile(imageStream, null, { type: imageType });
     
     console.log('📁 Created file object for OpenAI');
     
@@ -85,13 +89,11 @@ exports.handler = async (event, context) => {
       setTimeout(() => reject(new Error('Request timeout')), 24000); // 24s timeout
     });
     
-    // Edit image with OpenAI using proper file object
+    // Edit image with OpenAI (exactly like the working script)
     const editPromise = openai.images.edit({
-      model: "dall-e-2",
-      image: imageFile,
-      prompt: prompt,
-      response_format: "b64_json",
-      size: "1024x1024"
+      model: "gpt-image-1", // Use the same model as working script
+      image,
+      prompt,
     });
     
     console.log('🚀 Starting OpenAI image edit request...');
@@ -101,14 +103,20 @@ exports.handler = async (event, context) => {
 
     console.log('✅ Edit completed at:', new Date().toISOString());
 
-    if (!response || !response.data || !response.data[0]) {
-      throw new Error('Invalid response from OpenAI image edit');
+    // Handle response (exactly like the working script)
+    if (!response.data || response.data.length === 0) {
+      throw new Error('No image returned from OpenAI API');
     }
 
-    const editedImageBase64 = response.data[0].b64_json;
-    const imageUrl = `data:image/png;base64,${editedImageBase64}`;
+    const image_base64 = response.data[0].b64_json;
+    if (!image_base64) {
+      throw new Error('No base64 image data returned from OpenAI API');
+    }
+
+    // Convert to data URL for frontend display
+    const imageUrl = `data:image/png;base64,${image_base64}`;
     
-    console.log('✅ Career image edited successfully, size:', editedImageBase64.length, 'chars');
+    console.log('✅ Career image edited successfully, size:', image_base64.length, 'chars');
     
     return {
       statusCode: 200,
@@ -140,8 +148,6 @@ exports.handler = async (event, context) => {
       errorMessage = 'OpenAI service tijdelijk niet beschikbaar. Probeer het later opnieuw.';
     } else if (error.message.includes('Invalid image')) {
       errorMessage = 'De geüploade afbeelding is niet geschikt. Probeer een andere foto.';
-    } else if (error.message.includes('image_size')) {
-      errorMessage = 'De afbeelding is te groot of heeft een ongeldige grootte.';
     }
 
     return {
@@ -162,41 +168,41 @@ exports.handler = async (event, context) => {
 };
 
 function createCareerPrompt(careerField, specificRole) {
-  // Map career fields to professional transformation prompts
+  // Keep prompts simple and focused on transformation (like "Make the person look 40 years older")
   const careerPrompts = {
     // Zorg & Welzijn
-    'zorg': 'Transform this person into a confident healthcare professional wearing medical scrubs or professional healthcare attire, looking accomplished and caring',
-    'verpleegkunde': 'Transform this person into a professional nurse wearing modern medical scrubs, with a confident and caring expression, in a medical setting',
-    'fysiotherapie': 'Transform this person into a professional physiotherapist wearing appropriate medical attire, looking confident and knowledgeable',
-    'sociaal werk': 'Transform this person into a professional social worker in business casual attire, with a warm and professional appearance',
+    'zorg': 'Transform this person into a confident healthcare professional wearing medical scrubs',
+    'verpleegkunde': 'Transform this person into a professional nurse wearing medical scrubs',
+    'fysiotherapie': 'Transform this person into a professional physiotherapist in medical attire',
+    'sociaal werk': 'Transform this person into a professional social worker in business casual attire',
     
     // Onderwijs
-    'onderwijs': 'Transform this person into a confident teacher or educator in professional attire, looking inspiring and knowledgeable',
-    'leraar': 'Transform this person into a professional teacher wearing smart casual professional attire, with an inspiring and confident expression',
-    'pedagogiek': 'Transform this person into a professional educator or pedagogue in business attire, looking wise and approachable',
+    'onderwijs': 'Transform this person into a confident teacher in professional attire',
+    'leraar': 'Transform this person into a professional teacher wearing smart casual attire',
+    'pedagogiek': 'Transform this person into a professional educator in business attire',
     
     // Techniek & IT
-    'techniek': 'Transform this person into a professional engineer or technician wearing appropriate work attire, looking skilled and confident',
-    'informatica': 'Transform this person into a professional software developer or IT specialist in modern business casual attire, looking innovative and skilled',
-    'elektrotechniek': 'Transform this person into a professional electrical engineer wearing appropriate technical attire, looking expert and confident',
-    'bouwkunde': 'Transform this person into a professional architect or construction engineer wearing business attire with hard hat nearby, looking accomplished',
+    'techniek': 'Transform this person into a professional engineer in appropriate work attire',
+    'informatica': 'Transform this person into a software developer in modern business casual attire',
+    'elektrotechniek': 'Transform this person into a professional electrical engineer in technical attire',
+    'bouwkunde': 'Transform this person into a professional architect in business attire',
     
     // Business & Economie
-    'business': 'Transform this person into a professional business person wearing a modern suit or business attire, looking successful and confident',
-    'economie': 'Transform this person into a professional economist or business analyst in sophisticated business attire, looking accomplished and smart',
-    'marketing': 'Transform this person into a creative marketing professional in stylish business casual attire, looking innovative and successful',
-    'finance': 'Transform this person into a professional financial advisor or analyst wearing formal business attire, looking trustworthy and successful',
+    'business': 'Transform this person into a successful business professional in a modern suit',
+    'economie': 'Transform this person into a professional economist in sophisticated business attire',
+    'marketing': 'Transform this person into a creative marketing professional in stylish business casual',
+    'finance': 'Transform this person into a financial advisor in formal business attire',
     
     // Creatief
-    'creativiteit': 'Transform this person into a creative professional with artistic flair in their styling, looking inspired and accomplished',
-    'design': 'Transform this person into a professional designer wearing stylish creative attire, looking artistic and innovative',
-    'media': 'Transform this person into a media professional wearing contemporary business casual attire, looking creative and confident',
+    'creativiteit': 'Transform this person into a creative professional with artistic styling',
+    'design': 'Transform this person into a professional designer in stylish creative attire',
+    'media': 'Transform this person into a media professional in contemporary business casual',
     
     // Sport
-    'sport': 'Transform this person into a professional sports coach or fitness instructor wearing appropriate athletic professional attire, looking energetic and accomplished',
+    'sport': 'Transform this person into a professional sports coach in athletic professional attire',
     
     // Default
-    'default': 'Transform this person into a confident professional wearing appropriate business attire, looking successful and accomplished in their career'
+    'default': 'Transform this person into a confident professional in appropriate business attire'
   };
   
   // Use specific role if provided, otherwise use career field
