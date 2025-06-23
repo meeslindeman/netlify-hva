@@ -122,9 +122,9 @@ body::after {
 }
 
 .message.user .message-content {
-    background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+    background: linear-gradient(135deg, #5b4fcf 0%, #7c6df0 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(66, 153, 225, 0.3);
+    box-shadow: 0 4px 12px rgba(91, 79, 207, 0.3);
 }
 
 .message.assistant .message-content {
@@ -359,21 +359,12 @@ body::after {
     }
 }
 
-/* Scroll styling */
+/* Scroll styling - Hide scrollbar but keep functionality */
+.chat-container {
+    -ms-overflow-style: none;  /* Internet Explorer 10+ */
+    scrollbar-width: none;  /* Firefox */
+}
+
 .chat-container::-webkit-scrollbar {
-    width: 6px;
-}
-
-.chat-container::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
-}
-
-.chat-container::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 3px;
-}
-
-.chat-container::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.5);
+    display: none;  /* Safari and Chrome */
 }
