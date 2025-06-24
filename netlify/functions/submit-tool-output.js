@@ -11,30 +11,28 @@ export async function handler(event, context) {
   }
 
   try {
-    const { threadId, content, attachments } = JSON.parse(event.body);
+    const { threadId, runId, tool_outputs } = JSON.parse(event.body);
     
-    const messageData = {
-      role: 'user',
-      content
-    };
-    
-    if (attachments) {
-      messageData.attachments = attachments;
+    if (!threadId || !runId || !tool_outputs) {
+      return {
+        statusCode: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({ error: 'threadId, runId, and tool_outputs are required' })
+      };
     }
     
-    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
         'OpenAI-Beta': 'assistants=v2'
       },
-      body: JSON.stringify(messageData)
+      body: JSON.stringify({ tool_outputs })
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
     
     const data = await response.json();
     
@@ -47,14 +45,14 @@ export async function handler(event, context) {
       body: JSON.stringify(data)
     };
   } catch (error) {
-    console.error('Message addition error:', error);
+    console.error('Tool outputs error:', error);
     return {
       statusCode: 500,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
-      body: JSON.stringify({ error: 'Failed to add message to thread' })
+      body: JSON.stringify({ error: 'Failed to submit tool outputs' })
     };
   }
 }

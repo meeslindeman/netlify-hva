@@ -1,40 +1,26 @@
+import { OpenAI } from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 export async function handler(event, context) {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      },
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
 
   try {
-    const { threadId, content, attachments } = JSON.parse(event.body);
-    
-    const messageData = {
-      role: 'user',
-      content
-    };
-    
-    if (attachments) {
-      messageData.attachments = attachments;
-    }
-    
-    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+    const response = await fetch('https://api.openai.com/v1/threads', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
         'OpenAI-Beta': 'assistants=v2'
-      },
-      body: JSON.stringify(messageData)
+      }
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
     
     const data = await response.json();
     
@@ -42,19 +28,20 @@ export async function handler(event, context) {
       statusCode: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type'
       },
       body: JSON.stringify(data)
     };
   } catch (error) {
-    console.error('Message addition error:', error);
+    console.error('Thread creation error:', error);
     return {
       statusCode: 500,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
-      body: JSON.stringify({ error: 'Failed to add message to thread' })
+      body: JSON.stringify({ error: 'Failed to create thread' })
     };
   }
 }

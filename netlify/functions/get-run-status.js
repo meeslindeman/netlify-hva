@@ -1,5 +1,5 @@
 export async function handler(event, context) {
-  if (event.httpMethod !== 'POST') {
+  if (event.httpMethod !== 'GET') {
     return {
       statusCode: 405,
       headers: {
@@ -11,30 +11,25 @@ export async function handler(event, context) {
   }
 
   try {
-    const { threadId, content, attachments } = JSON.parse(event.body);
+    const { threadId, runId } = event.queryStringParameters;
     
-    const messageData = {
-      role: 'user',
-      content
-    };
-    
-    if (attachments) {
-      messageData.attachments = attachments;
+    if (!threadId || !runId) {
+      return {
+        statusCode: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({ error: 'threadId and runId are required' })
+      };
     }
     
-    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-      method: 'POST',
+    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
         'OpenAI-Beta': 'assistants=v2'
-      },
-      body: JSON.stringify(messageData)
+      }
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
     
     const data = await response.json();
     
@@ -47,14 +42,14 @@ export async function handler(event, context) {
       body: JSON.stringify(data)
     };
   } catch (error) {
-    console.error('Message addition error:', error);
+    console.error('Run status error:', error);
     return {
       statusCode: 500,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
-      body: JSON.stringify({ error: 'Failed to add message to thread' })
+      body: JSON.stringify({ error: 'Failed to get run status' })
     };
   }
 }

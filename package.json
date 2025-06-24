@@ -1,31 +1,17 @@
 {
   "name": "hva-chat-netlify",
   "version": "1.0.0",
-  "description": "HvA Study Coach Chatbot deployed on Netlify",
-  "main": "index.js",
+  "description": "HvA Study Choice Chat with Career Visualization",
   "scripts": {
-    "build": "echo 'No build step required'",
     "dev": "netlify dev",
-    "deploy": "netlify deploy",
-    "deploy:prod": "netlify deploy --prod"
+    "build": "echo 'Static site, no build needed'",
+    "deploy": "netlify deploy --prod"
   },
   "dependencies": {
-    "openai": "^4.20.0",
-    "replicate": "^0.22.0"
+    "openai": "^4.67.3",
+    "form-data": "^4.0.0"
   },
   "devDependencies": {
-    "netlify-cli": "^17.0.0"
-  },
-  "engines": {
-    "node": "18"
-  },
-  "keywords": [
-    "chatbot",
-    "education",
-    "hva",
-    "netlify",
-    "serverless"
-  ],
-  "author": "Mees Lindeman",
-  "license": "MIT"
+    "@netlify/functions": "^2.4.0"
+  }
 }

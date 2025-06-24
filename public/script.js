@@ -1,8 +1,6 @@
-// Updated script.js for Function Calling approach
-
 // Global variables
 let threadId = null;
-let uploadedUserImage = null; // Store the uploaded image globally
+let uploadedImageBase64 = null; // Store uploaded image in memory for Netlify
 const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const chatContainer = document.getElementById('chat-container');
@@ -65,9 +63,9 @@ async function sendMessage() {
     }
 }
 
-// API calls for Netlify Functions
+// Server-side API calls (now using Netlify Functions)
 async function createThread() {
-    const response = await fetch('/.netlify/functions/threads', {
+    const response = await fetch('/api/create-thread', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -79,7 +77,7 @@ async function createThread() {
 }
 
 async function addMessageToThread(threadId, content) {
-    const response = await fetch('/.netlify/functions/add-message', {
+    const response = await fetch(`/api/add-message`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -97,7 +95,7 @@ async function runAssistant(threadId) {
     console.log('🚀 Starting assistant run for thread:', threadId);
     
     // Start the run
-    const runResponse = await fetch('/.netlify/functions/run-assistant', {
+    const runResponse = await fetch(`/api/run-assistant`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -117,6 +115,7 @@ async function runAssistant(threadId) {
     let runStatus = await pollRunStatus(threadId, run.id);
     let maxIterations = 5;
     let iteration = 0;
+    let generatedCareerData = null; // Track if we already generated career visualization
     
     while (runStatus.status === 'requires_action' && iteration < maxIterations) {
         iteration++;
@@ -130,56 +129,87 @@ async function runAssistant(threadId) {
             
             if (toolCall.function.name === 'generate_career_visualization') {
                 try {
-                    const args = JSON.parse(toolCall.function.arguments);
-                    console.log('🎨 generate_career_visualization arguments:', args);
-                    
-                    // Check if we have an uploaded image
-                    if (!uploadedUserImage) {
+                    // Check if we already generated career visualization
+                    if (generatedCareerData) {
+                        console.log('🔄 Career visualization already generated, using cached result');
                         toolOutputs.push({
                             tool_call_id: toolCall.id,
-                            output: "ERROR: No uploaded image available. Please ask the user to upload a photo first before generating career visualization."
+                            output: `SUCCESS: Career visualization already generated. ${generatedCareerData}`
                         });
                         continue;
                     }
                     
-                    // Show loading message to user
-                    addMessage(`🎨 ${args.userMessage || 'Ik maak nu een beeld van jouw professionele toekomst... Dit kan even duren.'}`, 'assistant');
-                    showTyping();
+                    const args = JSON.parse(toolCall.function.arguments);
+                    console.log('👔 generate_career_visualization arguments:', args);
                     
-                    const imageResult = await generateCareerImage(
-                        uploadedUserImage, 
-                        args.careerField, 
-                        args.specificRole
-                    );
-                    
-                    hideTyping();
-                    
-                    if (imageResult && imageResult.success) {
-                        // Remove the loading message
-                        removeLastAssistantMessage();
-                        
-                        toolOutputs.push({
-                            tool_call_id: toolCall.id,
-                            output: `SUCCESS: Career visualization generated successfully. The image shows the user as a professional ${args.careerField} worker. Image URL: ${imageResult.imageUrl}`
-                        });
-                    } else {
-                        // Remove the loading message
-                        removeLastAssistantMessage();
-                        
-                        toolOutputs.push({
-                            tool_call_id: toolCall.id,
-                            output: `ERROR: Failed to generate career visualization. ${imageResult?.message || 'Please try again later.'}`
-                        });
+                    // Show user message if provided
+                    if (args.userMessage) {
+                        addMessage(args.userMessage, 'assistant');
                     }
                     
+                    const careerResult = await generateCareerVisualization({
+                        ...args,
+                        threadId: threadId,
+                        uploadedImageBase64: uploadedImageBase64 // Pass the stored image
+                    });
+                    console.log('🖼️ Career visualization result:', careerResult ? 'Success' : 'Failed');
+                    
+                    if (careerResult && careerResult.success) {
+                        generatedCareerData = `Career visualization generated successfully for ${args.careerField}${args.specificRole ? ` as ${args.specificRole}` : ''}. Image URL: ${careerResult.careerImageUrl}`;
+                        
+                        toolOutputs.push({
+                            tool_call_id: toolCall.id,
+                            output: `SUCCESS: ${generatedCareerData}`
+                        });
+                        
+                        // Display the career visualization immediately
+                        const careerMessage = `
+                            Here is your professional future as a ${args.specificRole || args.careerField} specialist! 👨‍💼👩‍💼
+                            
+                            ![Your Career Future](${careerResult.careerImageUrl})
+                            
+                            This is what you could look like in your dream career. What do you think?
+                        `;
+                        addMessage(careerMessage, 'assistant');
+                        
+                    } else {
+                        const errorMsg = careerResult?.message || 'Failed to generate career visualization';
+                        toolOutputs.push({
+                            tool_call_id: toolCall.id,
+                            output: `ERROR: ${errorMsg}`
+                        });
+                    }
                 } catch (error) {
                     console.error('❌ Error processing generate_career_visualization:', error);
-                    hideTyping();
-                    removeLastAssistantMessage();
-                    
                     toolOutputs.push({
                         tool_call_id: toolCall.id,
-                        output: `ERROR: ${error.message}`
+                        output: `ERROR: Failed to generate career visualization - ${error.message}`
+                    });
+                }
+            } else if (toolCall.function.name === 'generate_image') {
+                try {
+                    const args = JSON.parse(toolCall.function.arguments);
+                    console.log('🎨 generate_image arguments:', args);
+                    
+                    const imageResult = await generateImage(args.prompt);
+                    console.log('🖼️ Image generation result:', imageResult ? 'Success' : 'Failed');
+                    
+                    if (imageResult) {
+                        toolOutputs.push({
+                            tool_call_id: toolCall.id,
+                            output: `TASK COMPLETED: Successfully generated image. Image data: ${imageResult.data}`
+                        });
+                    } else {
+                        toolOutputs.push({
+                            tool_call_id: toolCall.id,
+                            output: "Failed to generate image - please try a different approach"
+                        });
+                    }
+                } catch (error) {
+                    console.error('❌ Error processing generate_image:', error);
+                    toolOutputs.push({
+                        tool_call_id: toolCall.id,
+                        output: "Error generating image"
                     });
                 }
             } else {
@@ -193,7 +223,7 @@ async function runAssistant(threadId) {
         
         console.log('📤 Submitting tool outputs:', toolOutputs.length, 'outputs');
         
-        const submitResponse = await fetch('/.netlify/functions/submit-tool-outputs', {
+        const submitResponse = await fetch(`/api/submit-tool-outputs`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -213,17 +243,28 @@ async function runAssistant(threadId) {
         
         runStatus = await pollRunStatus(threadId, run.id);
         console.log(`🔄 After tool submission - Status: ${runStatus.status}`);
+        
+        // If we generated career visualization and assistant still requires action, 
+        // break the loop to prevent infinite generation
+        if (generatedCareerData && runStatus.status === 'requires_action') {
+            console.log('🛑 Forcing completion - career visualization already generated');
+            break;
+        }
+    }
+    
+    // Handle case where career visualization was generated but run didn't complete normally
+    if (generatedCareerData && runStatus.status === 'requires_action') {
+        console.log('✅ Career visualization generated successfully, treating as completed');
+        return `Career visualization has been generated successfully. You can continue the conversation!`;
     }
     
     if (runStatus.status === 'completed') {
         console.log('✅ Assistant run completed successfully');
         
-        const messagesResponse = await fetch(`/.netlify/functions/messages?threadId=${threadId}`);
+        const messagesResponse = await fetch(`/api/get-messages?threadId=${threadId}`);
         const messages = await messagesResponse.json();
-        let lastMessage = messages.data[0].content[0].text.value;
-        
-        return lastMessage;
-        
+        const lastMessage = messages.data[0];
+        return lastMessage.content[0].text.value;
     } else {
         console.error('❌ Run failed with status:', runStatus.status);
         if (runStatus.last_error) {
@@ -252,7 +293,7 @@ async function pollRunStatus(threadId, runId) {
         
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        const response = await fetch(`/.netlify/functions/run-status?threadId=${threadId}&runId=${runId}`);
+        const response = await fetch(`/api/get-run-status?threadId=${threadId}&runId=${runId}`);
         runData = await response.json();
         status = runData.status;
         attempts++;
@@ -270,96 +311,61 @@ async function pollRunStatus(threadId, runId) {
     return runData;
 }
 
-// New function to generate career image using the edit approach
-async function generateCareerImage(imageData, careerField, specificRole) {
-    console.log('🎨 generateCareerImage() called with field:', careerField);
+// Generate career visualization via Netlify Function
+async function generateCareerVisualization(args) {
+    console.log('👔 generateCareerVisualization() called with args:', args);
     
     try {
-        const response = await fetch('/.netlify/functions/edit-career-image', {
+        const response = await fetch('/api/generate-career-visualization', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ 
-                imageData: imageData,
-                careerField: careerField,
-                specificRole: specificRole
-            })
+            body: JSON.stringify(args)
         });
         
         if (!response.ok) {
-            console.error('❌ Career image generation API error:', response.status);
             const errorData = await response.json();
-            return { success: false, message: errorData.message };
+            console.error('❌ Career visualization API error:', response.status, errorData);
+            return { success: false, message: errorData.message || 'Failed to generate career visualization' };
         }
         
         const data = await response.json();
-        console.log('📊 Career image generation response:', data.success ? 'Success' : 'Failed');
+        console.log('📊 Career visualization response:', data.success ? 'Success' : 'Failed');
         
         return data;
     } catch (error) {
-        console.error('💥 Error in generateCareerImage():', error);
-        return { success: false, message: 'Network error occurred' };
+        console.error('💥 Error in generateCareerVisualization():', error);
+        return { success: false, message: error.message };
     }
 }
 
-async function handleImageUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    console.log('📸 Image uploaded:', file.name, file.type, file.size);
-
-    if (!file.type.startsWith('image/')) {
-        alert('Please select an image file.');
-        return;
-    }
-
-    if (file.size > 20 * 1024 * 1024) {
-        alert('Image too large. Please select an image under 20MB.');
-        return;
-    }
-
+// Generate image via Netlify Function
+async function generateImage(prompt) {
+    console.log('🎨 generateImage() called with prompt:', prompt);
+    
     try {
-        const base64Image = await fileToBase64(file);
-        console.log('📝 Image converted to base64');
-
-        const welcomeScreen = document.getElementById('welcome-screen');
-        const chatContainer = document.getElementById('chat-container');
-
-        if (welcomeScreen && welcomeScreen.style.display !== 'none') {
-            welcomeScreen.style.display = 'none';
-            chatContainer.style.display = 'block';
-        }
-
-        addImageMessage(base64Image, file.name);
+        const response = await fetch('/api/generate-image', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ prompt: prompt })
+        });
         
-        // Store the uploaded image globally
-        uploadedUserImage = base64Image;
-        
-        // Send context to the assistant about the photo upload
-        if (!threadId) {
-            threadId = await createThread();
+        if (!response.ok) {
+            console.error('❌ Image generation API error:', response.status);
+            return null;
         }
         
-        showTyping();
+        const data = await response.json();
+        console.log('📊 Image generation response type:', data.type);
         
-        const contextMessage = `De student heeft zojuist een foto van zichzelf geüpload. Reageer enthousiast hierop en leg uit dat je deze foto zult gebruiken om later hun toekomstige professionele zelf te visualiseren zodra je meer weet over hun carrièredoelen. Ga door met je normale gespreksstructuur om hun waarden en toekomstvisie te ontdekken.`;
-        
-        await addMessageToThread(threadId, contextMessage);
-        const response = await runAssistant(threadId);
-        
-        hideTyping();
-        if (response) {
-            addMessage(response, 'assistant');
-        }
-
+        return data;
     } catch (error) {
-        hideTyping();
-        console.error('Error processing image:', error);
-        addMessage('Sorry, er was een fout bij het verwerken van je foto. Probeer het opnieuw!', 'assistant');
+        console.error('💥 Error in generateImage():', error);
+        return null;
     }
-
-    event.target.value = '';
 }
 
 function addMessage(text, sender) {
@@ -373,15 +379,8 @@ function addMessage(text, sender) {
     messageDiv.appendChild(contentDiv);
     chatContainer.insertBefore(messageDiv, typingIndicator);
     
+    // Scroll to bottom
     chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-function removeLastAssistantMessage() {
-    const messages = document.querySelectorAll('.message.assistant');
-    if (messages.length > 0) {
-        const lastMessage = messages[messages.length - 1];
-        lastMessage.remove();
-    }
 }
 
 function formatMessage(text) {
@@ -389,14 +388,15 @@ function formatMessage(text) {
     
     let processedText = text;
     
-    // Handle different image URL formats
-    processedText = processedText.replace(/Image URL:\s*(data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+)/gi, function(match, dataUrl) {
-        console.log('🖼️ Found career image with base64');
-        return `<img src="${dataUrl}" alt="Your professional future" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
+    // Handle "Generated image:" text with base64 data
+    processedText = processedText.replace(/Generated image:\s*(data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+)/gi, function(match, dataUrl) {
+        console.log('🖼️ Found generated image text with base64');
+        return `<img src="${dataUrl}" alt="Generated image" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
     });
     
-    processedText = processedText.replace(/\[([^\]]*)\]\((data:image\/[^)]+)\)/gi, function(match, alt, url) {
-        console.log('🖼️ Found markdown image with base64:', alt);
+    // Handle markdown links with images
+    processedText = processedText.replace(/\[([^\]]*)\]\(((?:data:image\/[^)]+|https:\/\/[^)]+))\)/gi, function(match, alt, url) {
+        console.log('🖼️ Found markdown image:', alt, url.startsWith('data:') ? 'base64' : 'URL');
         return `<img src="${url}" alt="${alt}" style="max-width: 100%; border-radius: 8px; margin: 8px 0; display: block;">`;
     });
     
@@ -421,35 +421,6 @@ function hideTyping() {
     sendBtn.disabled = false;
 }
 
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
-}
-
-function addImageMessage(base64Image, fileName) {
-    const chatContainer = document.getElementById('chat-container');
-    const typingIndicator = document.getElementById('typing-indicator');
-    
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message user';
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    contentDiv.innerHTML = `
-        <img src="${base64Image}" alt="${fileName}" style="max-width: 100%; border-radius: 8px; margin-bottom: 8px; display: block;">
-        <p style="margin: 0; font-size: 0.9em; opacity: 0.8;">📷 Photo uploaded: ${fileName}</p>
-    `;
-    
-    messageDiv.appendChild(contentDiv);
-    chatContainer.insertBefore(messageDiv, typingIndicator);
-    
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
 // Initialize image upload functionality
 function initializeImageUpload() {
     const uploadBtn = document.getElementById('uploadBtn');
@@ -469,20 +440,105 @@ function initializeImageUpload() {
     console.log('📷 Image upload functionality initialized');
 }
 
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function addImageMessage(base64Image, fileName) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message user';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.innerHTML = `
+        <img src="${base64Image}" alt="${fileName}" style="max-width: 100%; border-radius: 8px; margin-bottom: 8px; display: block;">
+        <p style="margin: 0; font-size: 0.9em; opacity: 0.8;">📷 Photo uploaded: ${fileName}</p>
+    `;
+    
+    messageDiv.appendChild(contentDiv);
+    chatContainer.insertBefore(messageDiv, typingIndicator);
+    
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// Simplified image upload handler for Netlify (stores in memory)
+async function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    console.log('📸 Image uploaded:', file.name, file.type, file.size);
+
+    if (!file.type.startsWith('image/')) {
+        alert('Please select an image file.');
+        return;
+    }
+
+    if (file.size > 20 * 1024 * 1024) {
+        alert('Image too large. Please select an image under 20MB.');
+        return;
+    }
+
+    try {
+        const base64Image = await fileToBase64(file);
+        console.log('📝 Image converted to base64');
+
+        // Store the image in memory for later use
+        uploadedImageBase64 = base64Image;
+
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const chatContainer = document.getElementById('chat-container');
+
+        if (welcomeScreen && welcomeScreen.style.display !== 'none') {
+            welcomeScreen.style.display = 'none';
+            chatContainer.style.display = 'block';
+        }
+
+        addImageMessage(base64Image, file.name);
+        showTyping();
+
+        // Create thread if it doesn't exist
+        if (!threadId) {
+            threadId = await createThread();
+        }
+        
+        // Send a message about the uploaded image to the assistant
+        await addMessageToThread(threadId, 'I uploaded an image. Please analyze it and tell me what you see.');
+        
+        const response = await runAssistant(threadId);
+        
+        hideTyping();
+        addMessage(response, 'assistant');
+
+    } catch (error) {
+        hideTyping();
+        console.error('Error processing image:', error);
+        addMessage('Sorry, there was an error processing your image. Please try again.', 'assistant');
+    }
+
+    // Clear the input
+    event.target.value = '';
+}
+
 // Focus input on load
 messageInput.focus();
 
 // Test API connection on load
 async function testConnection() {
-    console.log('✅ Ready to chat with your Study Choice Coach!');
+    console.log('✅ Ready to chat with your GPT Assistant on Netlify!');
 }
-
-// Test connection when page loads
-window.addEventListener('load', testConnection);
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeImageUpload);
+    document.addEventListener('DOMContentLoaded', () => {
+        initializeImageUpload();
+        testConnection();
+    });
 } else {
     initializeImageUpload();
+    testConnection();
 }

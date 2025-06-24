@@ -1,64 +1,11 @@
 [build]
-  functions = "netlify/functions"
   publish = "public"
+  functions = "netlify/functions"
 
-[build.environment]
-  NODE_VERSION = "18"
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
 
 [functions]
-  external_node_modules = ["openai"]
-
-# Timeout configurations for specific functions
-[functions."generate-career-image"]
-  timeout = 60
-
-[functions."edit-career-image"]
-  timeout = 30
-
-# API redirects for original endpoints
-[[redirects]]
-  from = "/api/threads"
-  to = "/.netlify/functions/threads"
-  status = 200
-
-[[redirects]]
-  from = "/api/threads/:threadId/messages"
-  to = "/.netlify/functions/add-message"
-  status = 200
-
-[[redirects]]
-  from = "/api/threads/:threadId/runs"
-  to = "/.netlify/functions/run-assistant"
-  status = 200
-
-[[redirects]]
-  from = "/api/threads/:threadId/runs/:runId"
-  to = "/.netlify/functions/run-status"
-  status = 200
-
-[[redirects]]
-  from = "/api/threads/:threadId/runs/:runId/submit_tool_outputs"
-  to = "/.netlify/functions/submit-tool-outputs"
-  status = 200
-
-[[redirects]]
-  from = "/api/threads/:threadId/messages"
-  to = "/.netlify/functions/messages"
-  status = 200
-
-# Image generation endpoints
-[[redirects]]
-  from = "/api/generate-career-image"
-  to = "/.netlify/functions/generate-career-image"
-  status = 200
-
-[[redirects]]
-  from = "/api/edit-career-image"
-  to = "/.netlify/functions/edit-career-image"
-  status = 200
-
-# Catch-all redirect for SPA
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+  node_bundler = "esbuild"
