@@ -122,16 +122,16 @@ body::after {
 }
 
 .message.user .message-content {
-    background: linear-gradient(135deg, #5b4fcf 0%, #7c6df0 100%);
+    background: linear-gradient(135deg, #2d1b69 0%, #5b4fcf 100%);
     color: white;
     box-shadow: 0 4px 12px rgba(91, 79, 207, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 2px solid white;
 }
 
 .message.assistant .message-content {
     background: rgba(255, 255, 255, 0.95);
     color: #2d1b69;
-    border: 2px solid rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
